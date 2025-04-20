@@ -2,40 +2,44 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
-  <title>Détection Main</title>
+  <title>Détection de la main</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     body, html {
       margin: 0;
       overflow: hidden;
-      background: black;
     }
     #container {
       position: relative;
     }
     video, canvas {
       position: absolute;
-      top: 0;
-      left: 0;
       width: 100vw;
       height: 100vh;
+      object-fit: cover;
     }
   </style>
 </head>
 <body>
   <div id="container">
-    <video id="video" autoplay playsinline></video>
+    <video id="video" autoplay playsinline muted></video>
     <canvas id="canvas"></canvas>
   </div>
 
-  <script type="module">
-    import { Hands } from 'https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js';
-    import { Camera } from 'https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js';
-    import { drawConnectors, drawLandmarks } from 'https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js';
+  <!-- MediaPipe scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 
+  <script>
     const videoElement = document.getElementById('video');
     const canvasElement = document.getElementById('canvas');
     const canvasCtx = canvasElement.getContext('2d');
+
+    function resizeCanvas() {
+      canvasElement.width = videoElement.videoWidth;
+      canvasElement.height = videoElement.videoHeight;
+    }
 
     const hands = new Hands({
       locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
@@ -49,13 +53,13 @@
     });
 
     hands.onResults(results => {
+      resizeCanvas();
       canvasCtx.save();
       canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
       canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
-
       if (results.multiHandLandmarks) {
         for (const landmarks of results.multiHandLandmarks) {
-          drawConnectors(canvasCtx, landmarks, Hands.HAND_CONNECTIONS, { color: '#0ff', lineWidth: 4 });
+          drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, { color: '#0ff', lineWidth: 4 });
           drawLandmarks(canvasCtx, landmarks, { color: '#ff0', lineWidth: 2 });
         }
       }
@@ -69,6 +73,7 @@
       width: 640,
       height: 480
     });
+
     camera.start();
   </script>
 </body>
