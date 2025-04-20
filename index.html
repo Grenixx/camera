@@ -41,6 +41,23 @@
       canvasElement.height = videoElement.videoHeight;
     }
 
+    async function startCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        videoElement.srcObject = stream;
+        videoElement.onloadedmetadata = () => {
+          console.log("Vidéo chargée avec succès !");
+          resizeCanvas();
+        };
+        videoElement.play(); // Assure-toi que la vidéo commence à jouer après le chargement
+      } catch (err) {
+        console.error("Erreur d'accès à la caméra :", err);
+        alert("Erreur d'accès à la caméra : " + err.message);
+      }
+    }
+
+    startCamera();
+
     const hands = new Hands({
       locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
     });
