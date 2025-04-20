@@ -3,8 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Détection de Main</title>
-  <script src="https://cdn.jsdelivr.net/npm/handtrackjs@0.0.12/dist/handtrack.min.js"></script>
+  <title>Détection de Main avec TensorFlow.js</title>
   <style>
     video {
       width: 100%;
@@ -16,43 +15,45 @@
 <body>
   <h1>Détection de Main avec la Caméra</h1>
   <video id="video" autoplay></video>
-
+  
   <script>
+    // Accéder à la caméra de l'utilisateur
     const video = document.getElementById('video');
-    const modelParams = {
-      flipHorizontal: true,   // pour une meilleure expérience mobile
-      maxNumBoxes: 1,         // Nombre maximal de mains à détecter
-      iouThreshold: 0.5,      // seuil de prédiction
-      scoreThreshold: 0.6,    // seuil de confiance pour la détection
-    };
+    
+    // Charger le modèle HandPose
+    async function loadHandPoseModel() {
+      const model = await handpose.load();  // Charger le modèle handpose
+      console.log('Modèle handpose chargé');
+      return model;
+    }
 
-    // Initialiser le modèle Handtrack.js
-    handTrack.load(modelParams).then(model => {
-      model.detect(video).then(predictions => {
-        console.log(predictions);
-        if (predictions.length > 0) {
-          console.log('Main détectée !');
-        } else {
-          console.log('Aucune main détectée');
-        }
-      });
+    // Fonction pour démarrer la détection
+    async function detectHand(model) {
+      const predictions = await model.estimateHands(video);  // Estimer les mains dans le flux vidéo
+      if (predictions.length > 0) {
+        console.log('Main détectée');
+        // Vous pouvez ici ajouter un code pour dessiner les points de la main, par exemple
+      } else {
+        console.log('Aucune main détectée');
+      }
+    }
 
-      // Configurer la vidéo pour afficher la caméra
-      navigator.mediaDevices.getUserMedia({
+    // Initialiser la caméra et démarrer la détection
+    async function startDetection() {
+      const model = await loadHandPoseModel();  // Charger le modèle HandPose
+      const stream = await navigator.mediaDevices.getUserMedia({
         video: true
-      }).then(stream => {
-        video.srcObject = stream;
-        setInterval(() => {
-          model.detect(video).then(predictions => {
-            if (predictions.length > 0) {
-              console.log('Main détectée');
-            } else {
-              console.log('Aucune main détectée');
-            }
-          });
-        }, 100);
       });
-    });
+      video.srcObject = stream;  // Assigner le flux vidéo à l'élément <video>
+      
+      // Détection continue
+      setInterval(() => {
+        detectHand(model);  // Appeler la détection à chaque intervalle
+      }, 100);
+    }
+
+    // Démarrer la détection dès que la page est prête
+    startDetection();
   </script>
 </body>
 </html>
