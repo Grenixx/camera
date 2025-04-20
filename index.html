@@ -2,96 +2,29 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
-  <title>Détection de la main</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <style>
-    body, html {
-      margin: 0;
-      overflow: hidden;
-    }
-    #container {
-      position: relative;
-    }
-    video, canvas {
-      position: absolute;
-      width: 100vw;
-      height: 100vh;
-      object-fit: cover;
-    }
-  </style>
+  <title>Tester la caméra</title>
 </head>
 <body>
-  <div id="container">
-    <video id="video" autoplay playsinline muted></video>
-    <canvas id="canvas"></canvas>
-  </div>
-
-  <!-- MediaPipe scripts -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-
+  <button onclick="startCamera()">Démarrer la caméra</button>
+  <video id="video" autoplay playsinline muted></video>
   <script>
-    const videoElement = document.getElementById('video');
-    const canvasElement = document.getElementById('canvas');
-    const canvasCtx = canvasElement.getContext('2d');
-
-    function resizeCanvas() {
-      canvasElement.width = videoElement.videoWidth;
-      canvasElement.height = videoElement.videoHeight;
-    }
-
     async function startCamera() {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        videoElement.srcObject = stream;
-        videoElement.onloadedmetadata = () => {
-          console.log("Vidéo chargée avec succès !");
-          resizeCanvas();
-        };
-        videoElement.play(); // Assure-toi que la vidéo commence à jouer après le chargement
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        console.log(devices);
+
+        const videoDevices = devices.filter(device => device.kind === 'videoinput');
+        if (videoDevices.length > 0) {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: videoDevices[0].deviceId } });
+          document.getElementById('video').srcObject = stream;
+        } else {
+          alert('Aucune caméra disponible.');
+        }
       } catch (err) {
         console.error("Erreur d'accès à la caméra :", err);
         alert("Erreur d'accès à la caméra : " + err.message);
       }
     }
-
-    startCamera();
-
-    const hands = new Hands({
-      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
-    });
-
-    hands.setOptions({
-      maxNumHands: 1,
-      modelComplexity: 1,
-      minDetectionConfidence: 0.7,
-      minTrackingConfidence: 0.5
-    });
-
-    hands.onResults(results => {
-      resizeCanvas();
-      canvasCtx.save();
-      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-      canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
-      if (results.multiHandLandmarks) {
-        for (const landmarks of results.multiHandLandmarks) {
-          drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, { color: '#0ff', lineWidth: 4 });
-          drawLandmarks(canvasCtx, landmarks, { color: '#ff0', lineWidth: 2 });
-        }
-      }
-      canvasCtx.restore();
-    });
-
-    const camera = new Camera(videoElement, {
-      onFrame: async () => {
-        await hands.send({ image: videoElement });
-      },
-      width: 640,
-      height: 480
-    });
-
-    camera.start();
   </script>
 </body>
 </html>
