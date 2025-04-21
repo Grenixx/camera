@@ -1,73 +1,35 @@
 import {
-  ObjectDetector,
-  FilesetResolver,
-  Detection,
-  ObjectDetectionResult
-} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.2";
-
-import {
   GestureRecognizer,
+  FilesetResolver,
   DrawingUtils
 } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3";
 
-// Initialiser le détecteur d'objets
-let objectDetector;
-let runningMode = "IMAGE";
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.131.3/build/three.module.js";
 
-const initializeObjectDetector = async () => {
-  const vision = await FilesetResolver.forVisionTasks(
-    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.2/wasm"
-  );
-  objectDetector = await ObjectDetector.createFromOptions(vision, {
-    baseOptions: {
-      modelAssetPath: `https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite`,
-      delegate: "GPU"
-    },
-    scoreThreshold: 0.5,
-    runningMode: runningMode
-  });
-};
-
-// Initialiser le détecteur de gestes
-let gestureRecognizer;
-
-const initGestureRecognizer = async () => {
-  const vision = await FilesetResolver.forVisionTasks(
-    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
-  );
-  gestureRecognizer = await GestureRecognizer.createFromOptions(vision, {
-    baseOptions: {
-      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task"
-    },
-    runningMode
-  });
-};
-
-await initializeObjectDetector();
-await initGestureRecognizer();
-
+// Éléments DOM
 const video = document.getElementById("webcam");
 const canvas = document.getElementById("output_canvas");
 const ctx = canvas.getContext("2d");
 const threeCanvas = document.getElementById("threeCanvas");
-
 const gestureNameEl = document.getElementById("gestureName");
 const handsCountEl = document.getElementById("handsCount");
 const timestampEl = document.getElementById("timestamp");
 
+// Initialisation des variables
+let gestureRecognizer;
+let runningMode = "IMAGE";
+let isLaunching = false;
+let launchVelocity = new THREE.Vector3();
 const renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, alpha: true });
 const scene = new THREE.Scene();
 const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
 camera.position.z = 1;
-
 const geometry = new THREE.BoxGeometry(0.05, 0.05, 0.05);
 const material = new THREE.MeshNormalMaterial();
 const cube = new THREE.Mesh(geometry, material);
 scene.add(cube);
 
-let isLaunching = false;
-let launchVelocity = new THREE.Vector3();
-
+// Réajustement des canvases
 const resizeCanvases = () => {
   const width = video.videoWidth;
   const height = video.videoHeight;
@@ -82,6 +44,20 @@ const resizeCanvases = () => {
   renderer.setSize(width, height);
 };
 
+// Fonction pour initialiser le GestureRecognizer
+const initGestureRecognizer = async () => {
+  const vision = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
+  );
+  gestureRecognizer = await GestureRecognizer.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task"
+    },
+    runningMode
+  });
+};
+
+// Démarrage de la webcam
 const startWebcam = async () => {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ video: true });
@@ -95,24 +71,22 @@ const startWebcam = async () => {
   }
 };
 
-startWebcam();
-
+// Fonction de détection continue
 let lastVideoTime = -1;
-
 const runDetection = async () => {
+  if (runningMode === "IMAGE") {
+    runningMode = "VIDEO";
+    await gestureRecognizer.setOptions({ runningMode: "VIDEO" });
+  }
+
   const drawingUtils = new DrawingUtils(ctx);
 
   const predict = async () => {
     if (video.currentTime !== lastVideoTime) {
       lastVideoTime = video.currentTime;
-
-      // Détection d'objets
-      const detections = await objectDetector.detectForVideo(video, performance.now());
-      displayVideoDetections(detections);
-
-      // Détection de gestes
       const nowInMs = Date.now();
       const results = await gestureRecognizer.recognizeForVideo(video, nowInMs);
+
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       let gesture = "Aucun";
@@ -131,7 +105,6 @@ const runDetection = async () => {
           lineWidth: 2
         });
 
-        // Superposer le cube sur les mains
         const palmIndices = [0, 1, 5, 9, 13, 17];
         let sumX = 0, sumY = 0, sumZ = 0;
         palmIndices.forEach(i => {
@@ -171,12 +144,16 @@ const runDetection = async () => {
         cube.rotation.setFromRotationMatrix(rotationMatrix);
       }
 
-      // Si un geste est détecté, affiche le nom
       if (results.gestures.length > 0) {
         gesture = results.gestures[0][0].categoryName;
-        gestureNameEl.textContent = gesture;
+
+        if (gesture === "Closed_Fist" && !isLaunching) {
+          isLaunching = true;
+          launchVelocity.set(0.05, 0.05, 0);
+        }
       }
 
+      gestureNameEl.textContent = gesture;
       handsCountEl.textContent = numHands;
       timestampEl.textContent = new Date().toLocaleTimeString();
     }
@@ -195,53 +172,11 @@ const runDetection = async () => {
   predict();
 };
 
-function displayVideoDetections(result: ObjectDetectionResult) {
-  const liveView = document.getElementById("liveView");
-  const children = [];
+// Fonction d'initialisation
+const init = async () => {
+  await initGestureRecognizer();  // Initialiser le GestureRecognizer
+  await startWebcam();  // Démarrer la webcam après l'initialisation du GestureRecognizer
+};
 
-  // Effacer les anciennes détections
-  for (let child of children) {
-    liveView.removeChild(child);
-  }
-
-  // Afficher les nouvelles détections d'objets
-  for (let detection of result.detections) {
-    const p = document.createElement("p");
-    p.innerText =
-      detection.categories[0].categoryName +
-      " - avec " +
-      Math.round(parseFloat(detection.categories[0].score) * 100) +
-      "% de confiance.";
-    p.style =
-      "left: " +
-      (video.offsetWidth - detection.boundingBox.width - detection.boundingBox.originX) +
-      "px;" +
-      "top: " +
-      detection.boundingBox.originY +
-      "px; " +
-      "width: " +
-      (detection.boundingBox.width - 10) +
-      "px;";
-
-    const highlighter = document.createElement("div");
-    highlighter.setAttribute("class", "highlighter");
-    highlighter.style =
-      "left: " +
-      (video.offsetWidth - detection.boundingBox.width - detection.boundingBox.originX) +
-      "px;" +
-      "top: " +
-      detection.boundingBox.originY +
-      "px;" +
-      "width: " +
-      (detection.boundingBox.width - 10) +
-      "px;" +
-      "height: " +
-      detection.boundingBox.height +
-      "px;";
-
-    liveView.appendChild(highlighter);
-    liveView.appendChild(p);
-    children.push(highlighter);
-    children.push(p);
-  }
-}
+// Appel de l'initialisation
+init();
