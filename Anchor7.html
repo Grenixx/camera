@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Cube index → personne</title>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.156.1/build/three.min.js"></script>
+  <style>
+    body { margin: 0; overflow: hidden; }
+    #container { position: relative; }
+    video, canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      transform: scaleX(-1);
+    }
+    #threeCanvas { pointer-events: none; z-index: 2; }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <video id="webcam" autoplay playsinline muted></video>
+    <canvas id="threeCanvas"></canvas>
+  </div>
+
+  <script type="module">
+    import {
+      FilesetResolver,
+      ObjectDetector,
+      GestureRecognizer
+    } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/vision_bundle.mjs";
+
+    // Elements
+    const video = document.getElementById("webcam");
+    const threeCanvas = document.getElementById("threeCanvas");
+
+    // Three.js setup
+    const renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, alpha: true });
+    const scene = new THREE.Scene();
+    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
+    camera.position.z = 1;
+
+    const cube = new THREE.Mesh(
+      new THREE.BoxGeometry(0.05, 0.05, 0.05),
+      new THREE.MeshNormalMaterial()
+    );
+    cube.visible = false;
+    scene.add(cube);
+
+    // Control vars
+    let targetPos = null;
+    let launchPos = null;
+    let isMoving = false;
+    const speed = 0.1; // speed interpolation factor
+
+    // Detectors
+    let objectDetector, gestureRecognizer;
+
+    // Offscreen canvas for downscaled detection
+    const offscreen = document.createElement('canvas');
+    const offCtx = offscreen.getContext('2d');
+    const DETECT_INTERVAL = 500; // ms
+    let lastDetect = 0;
+    let lastPersonCenter = null;
+
+    async function init() {
+      // Webcam
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true ,facingMode: { ideal: 'environment' }});
+      video.srcObject = stream;
+      await video.play();
+
+      // Three.js size
+      resize();
+      window.addEventListener('resize', resize);
+
+      // Load models
+      const vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
+      );
+      objectDetector = await ObjectDetector.createFromOptions(vision, {
+        baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite", delegate: 'GPU' },
+        scoreThreshold: 0.6,
+        categoryAllowlist: ['person']
+      });
+      gestureRecognizer = await GestureRecognizer.createFromOptions(vision, {
+        baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task" },
+        runningMode: 'VIDEO'
+      });
+
+      requestAnimationFrame(loop);
+    }
+
+    function resize() {
+      const w = video.videoWidth;
+      const h = video.videoHeight;
+      if (!w || !h) return;
+      threeCanvas.width = w;
+      threeCanvas.height = h;
+      renderer.setSize(w, h);
+      // offscreen at quarter resolution
+      offscreen.width = 320;
+      offscreen.height = Math.round((h / w) * 320);
+    }
+
+    function toThreeCoords(x, y) {
+      return {
+        x: (x / video.videoWidth) * 2 - 1,
+        y: -((y / video.videoHeight) * 2 - 1)
+      };
+    }
+
+    async function loop(timestamp) {
+      // Gesture detection every frame (fast)
+      const g = gestureRecognizer.recognizeForVideo(video, timestamp);
+      const tip = g.landmarks?.[0]?.[8];
+      if (tip && !isMoving) {
+        const pos = toThreeCoords(tip.x * video.videoWidth, tip.y * video.videoHeight);
+        cube.position.set(pos.x, pos.y, 0);
+        launchPos = new THREE.Vector3(pos.x, pos.y, 0);
+        cube.visible = true;
+      }
+
+      // Person detection throttled
+      if (timestamp - lastDetect > DETECT_INTERVAL) {
+        lastDetect = timestamp;
+        // draw small frame
+        offCtx.drawImage(video, 0, 0, offscreen.width, offscreen.height);
+        const result = await objectDetector.detect(offscreen);
+        const person = result.detections.find(d => d.categories[0].categoryName === 'person');
+        if (person && launchPos && !isMoving) {
+          const b = person.boundingBox;
+          // center in small coords -> map to video coords
+          const cx = (b.originX + b.width/2) * (video.videoWidth/offscreen.width);
+          const cy = (b.originY + b.height/2) * (video.videoHeight/offscreen.height);
+          const t = toThreeCoords(cx, cy);
+          targetPos = new THREE.Vector3(t.x, t.y, 0);
+          isMoving = true;
+        }
+      }
+
+      // Animate cube
+      if (isMoving && targetPos) {
+        cube.position.lerp(targetPos, speed);
+        cube.rotation.x += 0.02;
+        cube.rotation.y += 0.03;
+        if (cube.position.distanceTo(targetPos) < 0.01) {
+          isMoving = false;
+          cube.visible = false;
+        }
+      }
+
+      renderer.render(scene, camera);
+      requestAnimationFrame(loop);
+    }
+
+    init();
+  </script>
+</body>
+</html>
