@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Swipe Photos vers GitHub</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      background: #111;
+      color: white;
+      height: 100%;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #container {
+      max-width: 90vw;
+      max-height: 90vh;
+      position: relative;
+      perspective: 1000px;
+    }
+    #photo {
+      display: block;
+      max-width: 100%;
+      max-height: 100%;
+      border-radius: 12px;
+      box-shadow: 0 0 30px rgba(255, 255, 255, 0.1);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    #container::before, #container::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 4rem;
+      opacity: 0;
+      transition: opacity 0.2s ease;
+      pointer-events: none;
+    }
+    #container::before {
+      left: 20px;
+      content: "◀";
+      color: rgba(255, 255, 255, 0.7);
+    }
+    #container::after {
+      right: 20px;
+      content: "▶";
+      color: rgba(255, 255, 255, 0.7);
+    }
+    .swipe-left #photo {
+      transform: translateX(-30px) rotate(-5deg);
+      box-shadow: 0 0 40px rgba(255, 0, 0, 0.5);
+    }
+    .swipe-left::before {
+      opacity: 1;
+      animation: pulse 0.5s ease-in-out alternate infinite;
+    }
+    .swipe-right #photo {
+      transform: translateX(30px) rotate(5deg);
+      box-shadow: 0 0 40px rgba(0, 255, 0, 0.5);
+    }
+    .swipe-right::after {
+      opacity: 1;
+      animation: pulse 0.5s ease-in-out alternate infinite;
+    }
+    @keyframes pulse {
+      from { transform: scale(1); }
+      to   { transform: scale(1.2); }
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <img id="photo" src="" alt="Chargement...">
+  </div>
+
+  <script>
+  window.onload = function () {
+    const GITHUB_TOKEN = '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'; // Remplace après test
+    const OWNER = 'Grenixx';
+    const REPO = 'MakeDataset';
+    const SOURCE_FOLDER = 'photos';
+    const ACCEPT_FOLDER = 'accepter';
+    const REFUSE_FOLDER = 'refuser';
+
+    let images = [];
+    let currentIndex = 0;
+    let fileInfos = [];
+
+    async function loadImages() {
+      try {
+        const res = await fetch(`https://api.github.com/repos/${OWNER}/${REPO}/contents/${SOURCE_FOLDER}`);
+        if (!res.ok) throw new Error("Erreur d'accès au dossier GitHub");
+
+        const files = await res.json();
+        fileInfos = files.filter(f => f.type === 'file' && f.name.match(/\.(jpg|jpeg|png|gif)$/i));
+
+        // Préchargement des images
+        images = await Promise.all(
+          fileInfos.map(async f => {
+            const img = new Image();
+            img.src = `https://raw.githubusercontent.com/${OWNER}/${REPO}/main/${SOURCE_FOLDER}/${f.name}`;
+            await img.decode();
+            return img;
+          })
+        );
+
+        if (images.length === 0) throw new Error("Aucune image trouvée");
+        showImage(currentIndex);
+      } catch (err) {
+        alert(err.message);
+      }
+    }
+
+    function showImage(index) {
+      const img = document.getElementById('photo');
+      img.src = images[index].src;
+    }
+
+    async function moveImage(destination) {
+      const file = fileInfos[currentIndex];
+      const getUrl = `https://api.github.com/repos/${OWNER}/${REPO}/contents/${SOURCE_FOLDER}/${file.name}`;
+      const putUrl = `https://api.github.com/repos/${OWNER}/${REPO}/contents/${destination}/${file.name}`;
+
+      const getRes = await fetch(getUrl, {
+        headers: { Authorization: `token ${GITHUB_TOKEN}` }
+      });
+      const getData = await getRes.json();
+      const base64 = getData.content;
+
+      await fetch(putUrl, {
+        method: 'PUT',
+        headers: {
+          Authorization: `token ${GITHUB_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          message: `Déplacement de ${file.name} vers ${destination}`,
+          content: base64,
+          encoding: 'base64' // <-- AJOUTER CECI
+
+        })
+      });
+
+      await fetch(getUrl, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `token ${GITHUB_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          message: `Suppression de ${file.name} du dossier photos`,
+          sha: getData.sha
+          
+        })
+      });
+
+      images.splice(currentIndex, 1);
+      fileInfos.splice(currentIndex, 1);
+
+      if (images.length > 0) {
+        if (currentIndex >= images.length) currentIndex = images.length - 1;
+        showImage(currentIndex);
+      } else {
+        document.getElementById('photo').src = '';
+        alert("Toutes les images ont été traitées !");
+      }
+    }
+
+    // Gestion du swipe
+    let touchStartX = 0;
+    let touchEndX = 0;
+    const container = document.getElementById('container');
+
+    document.addEventListener('touchstart', e => {
+      touchStartX = e.changedTouches[0].screenX;
+      container.classList.remove('swipe-left', 'swipe-right');
+    });
+
+    document.addEventListener('touchmove', e => {
+      touchEndX = e.changedTouches[0].screenX;
+      const dx = touchEndX - touchStartX;
+      if (dx < -20) {
+        container.classList.add('swipe-left');
+        container.classList.remove('swipe-right');
+      } else if (dx > 20) {
+        container.classList.add('swipe-right');
+        container.classList.remove('swipe-left');
+      } else {
+        container.classList.remove('swipe-left', 'swipe-right');
+      }
+    });
+
+    document.addEventListener('touchend', () => {
+      const dx = touchEndX - touchStartX;
+      if (dx < -50) {
+        moveImage(REFUSE_FOLDER);
+      } else if (dx > 50) {
+        moveImage(ACCEPT_FOLDER);
+      } else {
+        container.classList.remove('swipe-left', 'swipe-right');
+      }
+    });
+
+    loadImages();
+  };
+  </script>
+</body>
+</html>

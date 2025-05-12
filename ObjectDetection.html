@@ -76,33 +76,29 @@
     .detectOnClick img {
       width: 100%;
     }
+
+    #overlayCanvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      z-index: 3;
+      pointer-events: none;
+    }
   </style>
 </head>
 <body>
   <h1>Multiple object detection using the MediaPipe Object Detector task</h1>
 
   <section id="demos" class="invisible">
-    <h2>Demo: Detecting Images</h2>
-    <p><b>Click on an image below</b> to detect objects in the image.</p>
-
-    <div class="detectOnClick">
-      <img src="https://assets.codepen.io/9177687/coupledog.jpeg" crossorigin="anonymous" title="Click to get classification!" />
-    </div>
-    <div class="detectOnClick">
-      <img src="https://assets.codepen.io/9177687/doggo.jpeg" crossorigin="anonymous" title="Click to get classification!" />
-    </div>
-
     <h2>Demo: Webcam continuous detection</h2>
     <p>Hold some objects up close to your webcam to get a real-time detection!</p>
-    <div>
-      This demo uses a model trained on the COCO dataset. <a href="https://github.com/amikelive/coco-labels/blob/master/coco-labels-2014_2017.txt" target="_blank">See a list of available classes</a>
-    </div>
     <div id="liveView" class="videoView">
       <button id="webcamButton" class="mdc-button mdc-button--raised">
         <span class="mdc-button__ripple"></span>
         <span class="mdc-button__label">ENABLE WEBCAM</span>
       </button>
       <video id="webcam" autoplay playsinline></video>
+      <canvas id="overlayCanvas"></canvas>
     </div>
   </section>
 
@@ -130,47 +126,9 @@
     };
     initializeObjectDetector();
 
-    const imageContainers = document.getElementsByClassName("detectOnClick");
-    for (let imageContainer of imageContainers) {
-      imageContainer.children[0].addEventListener("click", handleClick);
-    }
-
-    async function handleClick(event) {
-      const highlighters = event.target.parentNode.getElementsByClassName("highlighter");
-      while (highlighters[0]) highlighters[0].remove();
-
-      const infos = event.target.parentNode.getElementsByClassName("info");
-      while (infos[0]) infos[0].remove();
-
-      if (!objectDetector) {
-        alert("Object Detector is still loading.");
-        return;
-      }
-
-      if (runningMode === "VIDEO") {
-        runningMode = "IMAGE";
-        await objectDetector.setOptions({ runningMode: "IMAGE" });
-      }
-
-      const result = await objectDetector.detect(event.target);
-      const ratio = event.target.height / event.target.naturalHeight;
-
-      for (let detection of result.detections) {
-        const p = document.createElement("p");
-        p.className = "info";
-        p.innerText = `${detection.categories[0].categoryName} - ${Math.round(detection.categories[0].score * 100)}% confidence.`;
-        p.style = `left:${detection.boundingBox.originX * ratio}px;top:${detection.boundingBox.originY * ratio}px;width:${detection.boundingBox.width * ratio - 10}px;`;
-
-        const highlighter = document.createElement("div");
-        highlighter.className = "highlighter";
-        highlighter.style = `left:${detection.boundingBox.originX * ratio}px;top:${detection.boundingBox.originY * ratio}px;width:${detection.boundingBox.width * ratio}px;height:${detection.boundingBox.height * ratio}px;`;
-
-        event.target.parentNode.appendChild(highlighter);
-        event.target.parentNode.appendChild(p);
-      }
-    }
-
     const video = document.getElementById("webcam");
+    const overlayCanvas = document.getElementById("overlayCanvas");
+    const ctx = overlayCanvas.getContext("2d");
     const enableWebcamButton = document.getElementById("webcamButton");
 
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
@@ -185,27 +143,30 @@
 
         const detectWebcamFrame = async () => {
           const result = await objectDetector.detectForVideo(video, Date.now());
-          const children = liveView.querySelectorAll(".highlighter, .info");
-          children.forEach(c => c.remove());
+          ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
 
-          const ratio = video.videoHeight / video.videoHeight;
+          // Resize canvas to match video size
+          overlayCanvas.width = video.videoWidth;
+          overlayCanvas.height = video.videoHeight;
+
           for (let detection of result.detections) {
-            const p = document.createElement("p");
-            p.className = "info";
-            p.innerText = `${detection.categories[0].categoryName} - ${Math.round(detection.categories[0].score * 100)}% confidence.`;
-            p.style = `left:${detection.boundingBox.originX * ratio}px;top:${detection.boundingBox.originY * ratio}px;width:${detection.boundingBox.width * ratio - 10}px;`;
+            const centerX = (detection.boundingBox.originX + detection.boundingBox.width / 2);
+            const centerY = (detection.boundingBox.originY + detection.boundingBox.height / 2);
 
-            const highlighter = document.createElement("div");
-            highlighter.className = "highlighter";
-            highlighter.style = `left:${detection.boundingBox.originX * ratio}px;top:${detection.boundingBox.originY * ratio}px;width:${detection.boundingBox.width * ratio}px;height:${detection.boundingBox.height * ratio}px;`;
+            // Draw a red point at the center of the detection
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, 5, 0, 2 * Math.PI);
+            ctx.fillStyle = "red";
+            ctx.fill();
 
-                // Calcul du centre de la détection
-            const centerX = detection.boundingBox.originX + detection.boundingBox.width / 2;
-            const centerY = detection.boundingBox.originY + detection.boundingBox.height / 2;
-            console.log(`Centre de la détection: X = ${centerX}, Y = ${centerY}`);
-            liveView.appendChild(highlighter);
-            liveView.appendChild(p);
+            // Display the detection label (like 'person', 'dog', etc.)
+            const label = detection.categories[0].categoryName;
+            const confidence = Math.round(detection.categories[0].score * 100);
+            ctx.fillStyle = "white";
+            ctx.font = "20px Arial";
+            ctx.fillText(`${label} ${confidence}%`, centerX + 10, centerY + 10);
           }
+
           window.requestAnimationFrame(detectWebcamFrame);
         };
         window.requestAnimationFrame(detectWebcamFrame);

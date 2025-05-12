@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Swipe Photos</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      background: #111;
+      color: white;
+      height: 100%;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #container {
+      max-width: 90vw;
+      max-height: 90vh;
+      position: relative;
+      perspective: 1000px;
+    }
+    #photo {
+      display: block;
+      max-width: 100%;
+      max-height: 100%;
+      border-radius: 12px;
+      box-shadow: 0 0 30px rgba(255, 255, 255, 0.1);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    /* Flèches et color overlay */
+    #container::before,
+    #container::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 4rem;
+      opacity: 0;
+      transition: opacity 0.2s ease;
+      pointer-events: none;
+    }
+    /* Flèche gauche */
+    #container::before {
+      left: 20px;
+      content: "◀";
+      color: rgba(255, 255, 255, 0.7);
+    }
+    /* Flèche droite */
+    #container::after {
+      right: 20px;
+      content: "▶";
+      color: rgba(255, 255, 255, 0.7);
+    }
+    /* Etat swipe left */
+    .swipe-left #photo {
+      transform: translateX(-30px) rotate(-5deg);
+      box-shadow: 0 0 40px rgba(255, 0, 0, 0.5);
+    }
+    .swipe-left::before {
+      opacity: 1;
+      animation: pulse 0.5s ease-in-out alternate infinite;
+    }
+    /* Etat swipe right */
+    .swipe-right #photo {
+      transform: translateX(30px) rotate(5deg);
+      box-shadow: 0 0 40px rgba(0, 255, 0, 0.5);
+    }
+    .swipe-right::after {
+      opacity: 1;
+      animation: pulse 0.5s ease-in-out alternate infinite;
+    }
+    @keyframes pulse {
+      from { transform: scale(1); }
+      to   { transform: scale(1.2); }
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <img id="photo" src="" alt="Chargement...">
+  </div>
+
+  <script>
+    const owner = 'Grenixx';
+    const repo = 'MakeDataset';
+    const folder = 'photos';
+
+    let images = [];
+    let currentIndex = 0;
+      
+    async function loadImages() {
+      try {
+        const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${folder}`);
+        if (!res.ok) throw new Error("Erreur d'accès au dossier GitHub");
+        const files = await res.json();
+        images = files
+          .filter(f => f.type === 'file' && f.name.match(/\.(jpg|jpeg|png|gif)$/i))
+          .map(f => `https://raw.githubusercontent.com/${owner}/${repo}/main/${folder}/${f.name}`);
+        if (images.length === 0) throw new Error("Aucune image trouvée");
+        showImage(currentIndex);
+      } catch (err) {
+        alert(err.message);
+      }
+    }
+
+    function showImage(index) {
+      const img = document.getElementById('photo');
+      img.src = images[index];
+    }
+
+    // Gestion du swipe
+    let touchStartX = 0;
+    let touchEndX = 0;
+    const container = document.getElementById('container');
+
+    document.addEventListener('touchstart', e => {
+      touchStartX = e.changedTouches[0].screenX;
+      // On retire toute classe swipe pour repartir à zéro
+      container.classList.remove('swipe-left', 'swipe-right');
+    });
+
+    document.addEventListener('touchmove', e => {
+      touchEndX = e.changedTouches[0].screenX;
+      const dx = touchEndX - touchStartX;
+      if (dx < -20) {
+        container.classList.add('swipe-left');
+        container.classList.remove('swipe-right');
+      } else if (dx > 20) {
+        container.classList.add('swipe-right');
+        container.classList.remove('swipe-left');
+      } else {
+        container.classList.remove('swipe-left', 'swipe-right');
+      }
+    });
+
+    document.addEventListener('touchend', () => {
+      // On effectue le vrai changement d'image
+      if (touchEndX < touchStartX - 50) {
+        currentIndex = (currentIndex + 1) % images.length;
+      } else if (touchEndX > touchStartX + 50) {
+        currentIndex = (currentIndex - 1 + images.length) % images.length;
+      }
+      showImage(currentIndex);
+      // On enlève l'état swipe après l'animation
+      setTimeout(() => {
+        container.classList.remove('swipe-left', 'swipe-right');
+      }, 200);
+    });
+
+    loadImages();
+  </script>
+</body>
+</html>

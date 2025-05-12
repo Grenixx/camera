@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>AR Cube on Bottle</title>
+  <style>
+    body { margin: 0; overflow: hidden; }
+    video, canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      object-fit: cover;
+    }
+    #three-canvas {
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <video id="video" autoplay muted playsinline></video>
+  <canvas id="three-canvas"></canvas>
+
+  <script type="module">
+    import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.157.0/build/three.module.js';
+    import {
+      FilesetResolver,
+      ObjectDetector
+    } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/vision_bundle.mjs';
+
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('three-canvas');
+
+    // 🔹 Accès caméra
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+    video.srcObject = stream;
+    await video.play();
+
+    // 🔹 Chargement Vision et modèle MediaPipe
+    const vision = await FilesetResolver.forVisionTasks(
+      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm'
+    );
+
+    const detector = await ObjectDetector.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath:
+          'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite',
+        delegate: 'GPU'
+      },
+      scoreThreshold: 0.5,
+      categoryAllowlist: ['bottle']
+    });
+
+    // 🔹 Initialisation Three.js
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.z = 1;
+
+    const renderer = new THREE.WebGLRenderer({ canvas, alpha: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+
+    // 🔹 Création du cube (invisible par défaut)
+    const cube = new THREE.Mesh(
+      new THREE.BoxGeometry(0.2, 0.2, 0.2),
+      new THREE.MeshBasicMaterial({ color: 0xff0000 })
+    );
+    cube.visible = false;
+    scene.add(cube);
+
+    // 🔹 Animation
+    function animate() {
+      requestAnimationFrame(animate);
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    // 🔹 Boucle de détection
+    async function detectLoop() {
+      if (video.readyState >= 2) {
+        const result = await detector.detect(video);
+        const bottle = result.detections.find(
+          (d) => d.categories[0].categoryName === 'bottle'
+        );
+
+        if (bottle) {
+          const bbox = bottle.boundingBox;
+          const x = (bbox.originX + bbox.width / 2) / video.videoWidth * 2 - 1;
+          const y = -((bbox.originY + bbox.height / 2) / video.videoHeight * 2 - 1);
+          const vec = new THREE.Vector3(x, y, 0.5).unproject(camera);
+          cube.position.copy(vec);
+          cube.visible = true;
+        } else {
+          cube.visible = false;
+        }
+      }
+      requestAnimationFrame(detectLoop);
+    }
+
+    detectLoop();
+  </script>
+</body>
+</html>

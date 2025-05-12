@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hand Tracking with 3D Cube</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <link href="https://unpkg.com/material-components-web@latest/dist/material-components-web.min.css" rel="stylesheet">
+  <style>
+    body { 
+      margin: 0;
+      overflow: hidden;
+      font-family: roboto, sans-serif;
+    }
+    #threeCanvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      z-index: 1;
+      pointer-events: none;
+    }
+    #output_canvas{
+      position: absolute;
+      top: 0;
+      left: 0;
+      z-index: 0;
+    }
+    #webcamContainer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      z-index: 0;
+    }
+    #webcamButton {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 2;
+    }
+    #gesture_output {
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      background: rgba(0,0,0,0.7);
+      color: white;
+      padding: 10px;
+      z-index: 2;
+    }
+  </style>
+</head>
+<body>
+  
+  <div id="webcamContainer">
+    <div id="threeCanvas"></div>
+    <video id="webcam" autoplay playsinline></video>
+    <canvas id="output_canvas"></canvas>
+  </div>
+
+  <button id="webcamButton" class="mdc-button mdc-button--raised">
+    <span class="mdc-button__ripple"></span>
+    <span class="mdc-button__label">ENABLE WEBCAM</span>
+  </button>
+
+  <div id="gesture_output"></div>
+
+<script type="module">
+import {
+  GestureRecognizer,
+  FilesetResolver,
+  DrawingUtils
+} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3";
+
+// Three.js Setup
+let scene, camera, renderer, cube;
+function initThreeJS() {
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+  renderer = new THREE.WebGLRenderer({ alpha: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.getElementById('threeCanvas').appendChild(renderer.domElement);
+  
+  // Create rotating cube
+  const geometry = new THREE.BoxGeometry(0.3, 0.3, 0.3);
+  const material = new THREE.MeshBasicMaterial({ 
+    color: 0x00ff00,
+    wireframe: false 
+  });
+  cube = new THREE.Mesh(geometry, material);
+  cube.visible = false;
+  scene.add(cube);
+  camera.position.z = 5;
+}
+
+// MediaPipe Hand Tracking
+let gestureRecognizer;
+let webcamRunning = false;
+let lastVideoTime = -1;
+
+async function createGestureRecognizer() {
+  const vision = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
+  );
+  return await GestureRecognizer.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task",
+      delegate: "GPU"
+    },
+    runningMode: "VIDEO"
+  });
+}
+
+async function enableCam() {
+  if (!gestureRecognizer) {
+    gestureRecognizer = await createGestureRecognizer();
+  }
+
+  webcamRunning = !webcamRunning;
+  document.getElementById('webcamButton').children[1].textContent = 
+    webcamRunning ? "DISABLE WEBCAM" : "ENABLE WEBCAM";
+
+  if (webcamRunning) {
+    const video = document.getElementById("webcam");
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+    video.srcObject = stream;
+    await new Promise(resolve => video.onloadedmetadata = resolve);
+    video.play();
+    predictWebcam();
+  }
+}
+
+async function predictWebcam() {
+  const video = document.getElementById("webcam");
+  const canvas = document.getElementById("output_canvas");
+  const ctx = canvas.getContext("2d");
+  const drawingUtils = new DrawingUtils(ctx);
+
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+
+  while (webcamRunning) {
+    const nowInMs = Date.now();
+    if (video.currentTime !== lastVideoTime) {
+      lastVideoTime = video.currentTime;
+      const results = gestureRecognizer.recognizeForVideo(video, nowInMs);
+
+      // Update cube position
+      if (results.landmarks && results.landmarks.length > 0) {
+        const landmarks = results.landmarks[0];
+        const wrist = landmarks[0]; // Landmark 0: wrist
+        
+        // Convert normalized coordinates to screen space
+        const x = (1 - wrist.x) * video.videoWidth; // Mirror X axis
+        const y = wrist.y * video.videoHeight;
+        
+        // Convert to 3D space
+        cube.position.set(
+          (x - video.videoWidth/2) * 0.02,
+          -(y - video.videoHeight/2) * 0.02,
+          -wrist.z * 10
+        );
+        cube.visible = true;
+        cube.rotation.x += 0.01;
+        cube.rotation.y += 0.01;
+      } else {
+        cube.visible = false;
+      }
+
+      // Draw hand landmarks
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (results.landmarks) {
+        for (const landmarks of results.landmarks) {
+          drawingUtils.drawConnectors(landmarks, GestureRecognizer.HAND_CONNECTIONS, 
+            { color: "#00FF00", lineWidth: 2 });
+          drawingUtils.drawLandmarks(landmarks, { color: "#FF0000", lineWidth: 1 });
+        }
+      }
+
+      // Update gesture display
+      const outputDiv = document.getElementById("gesture_output");
+      if (results.gestures.length > 0) {
+        const gesture = results.gestures[0][0];
+        outputDiv.innerHTML = `Gesture: ${gesture.categoryName}<br>
+                              Confidence: ${Math.round(gesture.score * 100)}%`;
+      } else {
+        outputDiv.innerHTML = "";
+      }
+
+      // Render Three.js scene
+      renderer.render(scene, camera);
+    }
+    await new Promise(requestAnimationFrame);
+  }
+}
+
+// Initialize
+initThreeJS();
+document.getElementById("webcamButton").addEventListener("click", enableCam);
+</script>
+</body>
+</html>

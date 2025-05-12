@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>MediaPipe + Cube dynamique</title>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.156.1/build/three.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+    }
+
+    #container {
+      position: relative;
+      display: inline-block;
+    }
+
+    video, canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      transform: scaleX(-1);
+    }
+
+    #webcam {
+      z-index: 0;
+    }
+
+    #output_canvas {
+      z-index: 1;
+    }
+
+    #threeCanvas {
+      z-index: 2;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <video id="webcam" autoplay playsinline muted></video>
+    <canvas id="output_canvas"></canvas>
+    <canvas id="threeCanvas"></canvas>
+  </div>
+
+  <script type="module">
+    import {
+      GestureRecognizer,
+      FilesetResolver,
+      DrawingUtils
+    } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3";
+
+    const video = document.getElementById("webcam");
+    const canvas = document.getElementById("output_canvas");
+    const ctx = canvas.getContext("2d");
+    const threeCanvas = document.getElementById("threeCanvas");
+
+    let gestureRecognizer;
+    let runningMode = "IMAGE";
+
+    const renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, alpha: true });
+    const scene = new THREE.Scene();
+    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
+    camera.position.z = 1;
+
+    const geometry = new THREE.BoxGeometry(0.05, 0.05, 0.05);
+    const material = new THREE.MeshNormalMaterial();
+    const cube = new THREE.Mesh(geometry, material);
+    scene.add(cube);
+
+    const resizeCanvases = () => {
+      const width = video.videoWidth;
+      const height = video.videoHeight;
+      [canvas, threeCanvas].forEach(c => {
+        c.width = width;
+        c.height = height;
+        c.style.width = width + "px";
+        c.style.height = height + "px";
+      });
+      video.style.width = width + "px";
+      video.style.height = height + "px";
+      renderer.setSize(width, height);
+    };
+
+    const initGestureRecognizer = async () => {
+      const vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
+      );
+      gestureRecognizer = await GestureRecognizer.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task"
+        },
+        runningMode
+      });
+    };
+
+    await initGestureRecognizer();
+
+    navigator.mediaDevices.getUserMedia({ video: true }).then((stream) => {
+      video.srcObject = stream;
+      video.onloadedmetadata = () => {
+        resizeCanvases();
+        runDetection();
+      };
+    });
+
+    let lastVideoTime = -1;
+
+    const runDetection = async () => {
+      if (runningMode === "IMAGE") {
+        runningMode = "VIDEO";
+        await gestureRecognizer.setOptions({ runningMode: "VIDEO" });
+      }
+
+      const drawingUtils = new DrawingUtils(ctx);
+
+      const predict = async () => {
+        if (video.currentTime !== lastVideoTime) {
+          lastVideoTime = video.currentTime;
+          const nowInMs = Date.now();
+          const results = gestureRecognizer.recognizeForVideo(video, nowInMs);
+
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+          if (results.landmarks) {
+            for (const landmarks of results.landmarks) {
+              drawingUtils.drawConnectors(
+                landmarks,
+                GestureRecognizer.HAND_CONNECTIONS,
+                { color: "#00FF00", lineWidth: 3 }
+              );
+              drawingUtils.drawLandmarks(landmarks, {
+                color: "#FF0000",
+                lineWidth: 2
+              });
+
+              const indexTip = landmarks[8];
+              const x = indexTip.x * 2 - 1;
+              const y = -(indexTip.y * 2 - 1);
+
+              // Z = profondeur : plus proche = plus négatif
+              const zRaw = indexTip.z;
+              const scale = Math.max(0.3, 0.5 - zRaw);
+
+              cube.position.set(x, y, 0);
+              cube.scale.set(scale, scale, scale);
+            }
+          }
+        }
+
+        cube.rotation.x += 0.03;
+        cube.rotation.y += 0.04;
+
+        renderer.render(scene, camera);
+        requestAnimationFrame(predict);
+      };
+
+      predict();
+    };
+  </script>
+</body>
+</html>

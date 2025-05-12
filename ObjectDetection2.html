@@ -76,6 +76,19 @@
     .detectOnClick img {
       width: 100%;
     }
+
+    /* Canevas ajouté au-dessus de la vidéo */
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      pointer-events: none;
+      z-index: 10; /* S'assurer que le canevas est au-dessus de la vidéo */
+    }
+
+    .detectOnClick img {
+      width: 100%;
+    }
   </style>
 </head>
 <body>
@@ -103,6 +116,7 @@
         <span class="mdc-button__label">ENABLE WEBCAM</span>
       </button>
       <video id="webcam" autoplay playsinline></video>
+      <canvas id="overlayCanvas"></canvas> <!-- Canevas ajouté -->
     </div>
   </section>
 
@@ -172,6 +186,8 @@
 
     const video = document.getElementById("webcam");
     const enableWebcamButton = document.getElementById("webcamButton");
+    const canvas = document.getElementById("overlayCanvas");
+    const ctx = canvas.getContext("2d");
 
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
       enableWebcamButton.addEventListener("click", async () => {
@@ -182,6 +198,12 @@
         video.srcObject = stream;
         runningMode = "VIDEO";
         await objectDetector.setOptions({ runningMode: "VIDEO" });
+
+        video.onloadedmetadata = () => {
+          // Mettre à jour la taille du canevas avec les dimensions de la vidéo
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+        };
 
         const detectWebcamFrame = async () => {
           const result = await objectDetector.detectForVideo(video, Date.now());
@@ -199,13 +221,23 @@
             highlighter.className = "highlighter";
             highlighter.style = `left:${detection.boundingBox.originX * ratio}px;top:${detection.boundingBox.originY * ratio}px;width:${detection.boundingBox.width * ratio}px;height:${detection.boundingBox.height * ratio}px;`;
 
-                // Calcul du centre de la détection
+            // Calcul du centre de la détection
             const centerX = detection.boundingBox.originX + detection.boundingBox.width / 2;
             const centerY = detection.boundingBox.originY + detection.boundingBox.height / 2;
             console.log(`Centre de la détection: X = ${centerX}, Y = ${centerY}`);
+
+            // Dessiner le point rouge au centre
+            ctx.clearRect(0, 0, canvas.width, canvas.height); 
+            ctx.beginPath();
+            ctx.arc(centerX * ratio, centerY * ratio, 5, 0, Math.PI * 2);
+            ctx.fillStyle = "red";
+            ctx.fill();
+            ctx.closePath();
+
             liveView.appendChild(highlighter);
             liveView.appendChild(p);
           }
+
           window.requestAnimationFrame(detectWebcamFrame);
         };
         window.requestAnimationFrame(detectWebcamFrame);

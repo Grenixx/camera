@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fake AR Cube</title>
+  <style>
+    html, body { margin: 0; overflow: hidden; }
+    #video {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100vw; height: 100vh;
+      object-fit: cover;
+      z-index: -1;
+    }
+    button {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      padding: 10px 20px;
+      font-size: 18px;
+      z-index: 1;
+    }
+  </style>
+</head>
+<body>
+  <video id="video" autoplay playsinline muted></video>
+  <button id="placeCube">📍 Placer cube</button>
+
+  <script type="module">
+    import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js";
+
+    const video = document.getElementById("video");
+
+    // Affiche le flux vidéo
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+      .then(stream => {
+        video.srcObject = stream;
+      });
+
+    // Three.js setup
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 100);
+    const renderer = new THREE.WebGLRenderer({ alpha: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.domElement.style.position = "absolute";
+    document.body.appendChild(renderer.domElement);
+
+    // Lumière
+    const light = new THREE.HemisphereLight(0xffffff, 0x444444, 1);
+    scene.add(light);
+
+    // Cube rouge
+    const geometry = new THREE.BoxGeometry(0.2, 0.2, 0.2);
+    const material = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+    const cube = new THREE.Mesh(geometry, material);
+    cube.visible = false;
+    scene.add(cube);
+
+    document.getElementById("placeCube").addEventListener("click", () => {
+      // Place le cube à 0.5m devant la caméra
+      const distance = 0.5;
+      const vector = new THREE.Vector3(0, 0, -distance);
+      vector.applyQuaternion(camera.quaternion); // oriente selon la caméra
+      cube.position.copy(camera.position).add(vector);
+      cube.visible = true;
+    });
+
+    function animate() {
+      requestAnimationFrame(animate);
+      renderer.render(scene, camera);
+    }
+
+    animate();
+
+    window.addEventListener("resize", () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html>

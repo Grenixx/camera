@@ -1,182 +1,163 @@
 import {
-  GestureRecognizer,
-  FilesetResolver,
-  DrawingUtils
-} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3";
+  ObjectDetector,
+  FilesetResolver
+} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.2";
 
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.131.3/build/three.module.js";
-
-// Éléments DOM
-const video = document.getElementById("webcam");
-const canvas = document.getElementById("output_canvas");
-const ctx = canvas.getContext("2d");
-const threeCanvas = document.getElementById("threeCanvas");
-const gestureNameEl = document.getElementById("gestureName");
-const handsCountEl = document.getElementById("handsCount");
-const timestampEl = document.getElementById("timestamp");
-
-// Initialisation des variables
-let gestureRecognizer;
+const demosSection = document.getElementById("demos");
+let objectDetector;
 let runningMode = "IMAGE";
-let isLaunching = false;
-let launchVelocity = new THREE.Vector3();
-const renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, alpha: true });
-const scene = new THREE.Scene();
-const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
-camera.position.z = 1;
-const geometry = new THREE.BoxGeometry(0.05, 0.05, 0.05);
-const material = new THREE.MeshNormalMaterial();
-const cube = new THREE.Mesh(geometry, material);
-scene.add(cube);
 
-// Réajustement des canvases
-const resizeCanvases = () => {
-  const width = video.videoWidth;
-  const height = video.videoHeight;
-  [canvas, threeCanvas].forEach(c => {
-    c.width = width;
-    c.height = height;
-    c.style.width = width + "px";
-    c.style.height = height + "px";
-  });
-  video.style.width = width + "px";
-  video.style.height = height + "px";
-  renderer.setSize(width, height);
-};
-
-// Fonction pour initialiser le GestureRecognizer
-const initGestureRecognizer = async () => {
+// Initialize the object detector
+const initializeObjectDetector = async () => {
   const vision = await FilesetResolver.forVisionTasks(
-    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.2/wasm"
   );
-  gestureRecognizer = await GestureRecognizer.createFromOptions(vision, {
+  objectDetector = await ObjectDetector.createFromOptions(vision, {
     baseOptions: {
-      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task"
+      modelAssetPath: `https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite`,
+      delegate: "GPU"
     },
-    runningMode
+    scoreThreshold: 0.5,
+    runningMode: runningMode
   });
+  demosSection.classList.remove("invisible");
 };
+initializeObjectDetector();
 
-// Démarrage de la webcam
-const startWebcam = async () => {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-    video.srcObject = stream;
-    video.onloadedmetadata = () => {
-      resizeCanvases();
-      runDetection();
-    };
-  } catch (error) {
-    console.error("Erreur lors de l'accès à la caméra : ", error);
+// Demo 1: Detect on image click
+const imageContainers = document.getElementsByClassName("detectOnClick");
+for (let i = 0; i < imageContainers.length; i++) {
+  imageContainers[i].children[0].addEventListener("click", handleClick);
+}
+
+async function handleClick(event) {
+  const highlighters = event.target.parentNode.getElementsByClassName("highlighter");
+  while (highlighters[0]) highlighters[0].parentNode.removeChild(highlighters[0]);
+
+  const infos = event.target.parentNode.getElementsByClassName("info");
+  while (infos[0]) infos[0].parentNode.removeChild(infos[0]);
+
+  if (!objectDetector) {
+    alert("Object Detector is still loading. Please try again.");
+    return;
   }
-};
 
-// Fonction de détection continue
+  if (runningMode === "VIDEO") {
+    runningMode = "IMAGE";
+    await objectDetector.setOptions({ runningMode: "IMAGE" });
+  }
+
+  const ratio = event.target.height / event.target.naturalHeight;
+  const detections = await objectDetector.detect(event.target);
+  displayImageDetections(detections, event.target, ratio);
+}
+
+function displayImageDetections(result, resultElement, ratio) {
+  for (let detection of result.detections) {
+    const p = document.createElement("p");
+    p.setAttribute("class", "info");
+    p.innerText = detection.categories[0].categoryName +
+      " - with " +
+      Math.round(parseFloat(detection.categories[0].score) * 100) +
+      "% confidence.";
+    p.style = "left: " + detection.boundingBox.originX * ratio + "px;" +
+      "top: " + detection.boundingBox.originY * ratio + "px;" +
+      "width: " + (detection.boundingBox.width * ratio - 10) + "px;";
+
+    const highlighter = document.createElement("div");
+    highlighter.setAttribute("class", "highlighter");
+    highlighter.style = "left: " + detection.boundingBox.originX * ratio + "px;" +
+      "top: " + detection.boundingBox.originY * ratio + "px;" +
+      "width: " + detection.boundingBox.width * ratio + "px;" +
+      "height: " + detection.boundingBox.height * ratio + "px;";
+
+    resultElement.parentNode.appendChild(highlighter);
+    resultElement.parentNode.appendChild(p);
+  }
+}
+
+// Demo 2: Detect with webcam
+const video = document.getElementById("webcam");
+const liveView = document.getElementById("liveView");
+let enableWebcamButton;
+let children = [];
+
+function hasGetUserMedia() {
+  return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+}
+
+if (hasGetUserMedia()) {
+  enableWebcamButton = document.getElementById("webcamButton");
+  enableWebcamButton.addEventListener("click", enableCam);
+} else {
+  console.warn("getUserMedia() is not supported by your browser");
+}
+
+async function enableCam() {
+  if (!objectDetector) {
+    console.log("Wait! objectDetector not loaded yet.");
+    return;
+  }
+
+  enableWebcamButton.classList.add("removed");
+
+  const constraints = { video: true };
+  navigator.mediaDevices.getUserMedia(constraints)
+    .then(function (stream) {
+      video.srcObject = stream;
+      video.addEventListener("loadeddata", predictWebcam);
+    })
+    .catch((err) => {
+      console.error(err);
+    });
+}
+
 let lastVideoTime = -1;
-const runDetection = async () => {
+async function predictWebcam() {
   if (runningMode === "IMAGE") {
     runningMode = "VIDEO";
-    await gestureRecognizer.setOptions({ runningMode: "VIDEO" });
+    await objectDetector.setOptions({ runningMode: "VIDEO" });
   }
 
-  const drawingUtils = new DrawingUtils(ctx);
+  let startTimeMs = performance.now();
+  if (video.currentTime !== lastVideoTime) {
+    lastVideoTime = video.currentTime;
+    const detections = await objectDetector.detectForVideo(video, startTimeMs);
+    displayVideoDetections(detections);
+  }
 
-  const predict = async () => {
-    if (video.currentTime !== lastVideoTime) {
-      lastVideoTime = video.currentTime;
-      const nowInMs = Date.now();
-      const results = await gestureRecognizer.recognizeForVideo(video, nowInMs);
+  window.requestAnimationFrame(predictWebcam);
+}
 
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+function displayVideoDetections(result) {
+  for (let child of children) {
+    liveView.removeChild(child);
+  }
+  children = [];
 
-      let gesture = "Aucun";
-      let numHands = results.landmarks.length;
+  for (let detection of result.detections) {
+    const p = document.createElement("p");
+    p.innerText = detection.categories[0].categoryName +
+      " - with " +
+      Math.round(parseFloat(detection.categories[0].score) * 100) +
+      "% confidence.";
+    p.style = "left: " +
+      (video.offsetWidth - detection.boundingBox.width - detection.boundingBox.originX) + "px;" +
+      "top: " + detection.boundingBox.originY + "px;" +
+      "width: " + (detection.boundingBox.width - 10) + "px;";
 
-      if (results.landmarks.length > 0) {
-        const landmarks = results.landmarks[0];
+    const highlighter = document.createElement("div");
+    highlighter.setAttribute("class", "highlighter");
+    highlighter.style = "left: " +
+      (video.offsetWidth - detection.boundingBox.width - detection.boundingBox.originX) + "px;" +
+      "top: " + detection.boundingBox.originY + "px;" +
+      "width: " + (detection.boundingBox.width - 10) + "px;" +
+      "height: " + detection.boundingBox.height + "px;";
 
-        drawingUtils.drawConnectors(
-          landmarks,
-          GestureRecognizer.HAND_CONNECTIONS,
-          { color: "#00FF00", lineWidth: 3 }
-        );
-        drawingUtils.drawLandmarks(landmarks, {
-          color: "#FF0000",
-          lineWidth: 2
-        });
+    liveView.appendChild(highlighter);
+    liveView.appendChild(p);
 
-        const palmIndices = [0, 1, 5, 9, 13, 17];
-        let sumX = 0, sumY = 0, sumZ = 0;
-        palmIndices.forEach(i => {
-          sumX += landmarks[i].x;
-          sumY += landmarks[i].y;
-          sumZ += landmarks[i].z;
-        });
-        const avgX = sumX / palmIndices.length;
-        const avgY = sumY / palmIndices.length;
-        const avgZ = sumZ / palmIndices.length;
-
-        const baseX = avgX * 2 - 1;
-        const baseY = -(avgY * 2 - 1);
-
-        const wrist = landmarks[0];
-        const p5 = landmarks[5];
-        const p17 = landmarks[17];
-
-        const v1 = new THREE.Vector3(p5.x - wrist.x, p5.y - wrist.y, p5.z - wrist.z);
-        const v2 = new THREE.Vector3(p17.x - wrist.x, p17.y - wrist.y, p17.z - wrist.z);
-        const normal = new THREE.Vector3().crossVectors(v1, v2).normalize();
-
-        const offset = 0.17;
-        const cubeX = baseX + normal.x * offset;
-        const cubeY = baseY - normal.y * offset;
-        const cubeZ = normal.z * offset;
-
-        if (!isLaunching) {
-          cube.position.set(cubeX, cubeY, cubeZ);
-        }
-
-        cube.scale.set(5, 5, 5);
-
-        const palmDir = v1.clone().normalize();
-        const rotationMatrix = new THREE.Matrix4();
-        rotationMatrix.lookAt(palmDir, new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 1, 0));
-        cube.rotation.setFromRotationMatrix(rotationMatrix);
-      }
-
-      if (results.gestures.length > 0) {
-        gesture = results.gestures[0][0].categoryName;
-
-        if (gesture === "Closed_Fist" && !isLaunching) {
-          isLaunching = true;
-          launchVelocity.set(0.05, 0.05, 0);
-        }
-      }
-
-      gestureNameEl.textContent = gesture;
-      handsCountEl.textContent = numHands;
-      timestampEl.textContent = new Date().toLocaleTimeString();
-    }
-
-    if (isLaunching) {
-      cube.position.add(launchVelocity);
-      if (cube.position.x > 1.5 || cube.position.y > 1.5) {
-        isLaunching = false;
-      }
-    }
-
-    renderer.render(scene, camera);
-    requestAnimationFrame(predict);
-  };
-
-  predict();
-};
-
-// Fonction d'initialisation
-const init = async () => {
-  await initGestureRecognizer();  // Initialiser le GestureRecognizer
-  await startWebcam();  // Démarrer la webcam après l'initialisation du GestureRecognizer
-};
-
-// Appel de l'initialisation
-init();
+    children.push(highlighter);
+    children.push(p);
+  }
+}

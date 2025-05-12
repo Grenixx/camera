@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Upload Photo vers GitHub</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 2rem; }
+    input, button { padding: 0.5rem; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <h1>Prendre une photo et l'envoyer sur GitHub, PUT YOURE GIT HUB TOKEN KEY</h1>
+  <input type="text" id="textInput"/>
+  <input type="file" id="fileInput" accept="image/*" capture="environment" />
+  <button id="uploadBtn" disabled>Uploader sur GitHub</button>
+
+  <script>
+    // --- CONFIGURATION ---
+    const GITHUB_TOKEN = document.getElementById("textInput").value; // Remplacez par votre token GitHub dans le text input 
+    const OWNER = 'Grenixx';    // Propriétaire du dépôt
+    const REPO = 'MakeDataset';             // Nom du dépôt
+    const TARGET_PATH = 'photos';              // Dossier cible dans le dépôt
+
+    const fileInput = document.getElementById('fileInput');
+    const uploadBtn = document.getElementById('uploadBtn');
+    let selectedFile = null;
+
+    fileInput.addEventListener('change', event => {
+      selectedFile = event.target.files[0];
+      uploadBtn.disabled = !selectedFile;
+    });
+
+    uploadBtn.addEventListener('click', async () => {
+   	const GITHUB_TOKEN = document.getElementById("textInput").value; // Remplacez par votre token GitHub dans le text input 
+
+      if (!selectedFile) return;
+	
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const content = reader.result.split(',')[1]; // Base64
+        const path = `${TARGET_PATH}/${selectedFile.name}`;
+        const url = `https://api.github.com/repos/${OWNER}/${REPO}/contents/${path}`;
+
+        const body = JSON.stringify({
+          message: `Ajout de ${selectedFile.name}`,
+          content: content,
+        });
+
+        const response = await fetch(url, {
+          method: 'PUT',
+          headers: {
+            'Authorization': `token ${GITHUB_TOKEN}`,
+            'Accept': 'application/vnd.github.v3+json'
+          },
+          body: body
+        });
+
+        if (response.ok) {
+          alert('Photo uploadée avec succès !');
+        } else {
+          const errorData = await response.json();
+          console.error(errorData);
+          alert("Erreur lors de l'upload : " + errorData.message);
+        }
+      };
+      reader.readAsDataURL(selectedFile);
+    });
+  </script>
+</body>
+</html>
