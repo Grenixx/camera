@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Vote Photos</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      background: #111;
+      color: white;
+      height: 100%;
+      font-family: sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    #container {
+      max-width: 90vw;
+      max-height: 70vh;
+      margin-bottom: 20px;
+    }
+    #photo {
+      display: block;
+      max-width: 100%;
+      max-height: 100%;
+      border-radius: 12px;
+      box-shadow: 0 0 30px rgba(255, 255, 255, 0.2);
+    }
+    #buttons {
+      display: flex;
+      gap: 20px;
+    }
+    button {
+      padding: 12px 24px;
+      font-size: 18px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.2s ease;
+    }
+    .yes { background: green; color: white; }
+    .no  { background: crimson; color: white; }
+    #download {
+      margin-top: 20px;
+      background: #444;
+      color: white;
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <img id="photo" src="" alt="Chargement...">
+  </div>
+  <div id="buttons">
+    <button class="yes" onclick="vote('yes')">Oui</button>
+    <button class="no" onclick="vote('no')">Non</button>
+  </div>
+
+  <script>
+    const owner = 'Grenixx';
+    const repo = 'MakeDataset';
+    const folder = 'photos';
+    const jsonFile = 'vot.json';
+
+    let GITHUB_TOKEN = null;
+    let images = [];
+    let currentIndex = 0;
+    let votes = {};
+    let fileSHA = null;
+
+    // 1. Récupère le nom de fichier commençant par "ghp" comme token
+    async function fetchTokenFromFileName() {
+      const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents`);
+      const files = await res.json();
+      const tokenFile = files.find(f => f.name.startsWith('ghp') && f.name.endsWith('.html'));
+
+      if (!tokenFile) throw new Error("Fichier token non trouvé !");
+      GITHUB_TOKEN = tokenFile.name.replace('.html', '');
+    }
+
+    // 2. Charge les images depuis GitHub
+    async function loadImages() {
+      const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${folder}`);
+      const files = await res.json();
+      images = files
+        .filter(f => f.type === 'file' && f.name.match(/\.(jpg|jpeg|png|gif)$/i))
+        .map(f => ({ name: f.name, url: `https://raw.githubusercontent.com/${owner}/${repo}/main/${folder}/${f.name}` }));
+
+      if (images.length === 0) throw new Error("Aucune image trouvée");
+
+      await loadVotes(); // Charge les votes existants
+      images.forEach(img => {
+        if (!votes[img.name]) votes[img.name] = { yes: 0, no: 0 };
+      });
+      showImage(currentIndex); // Affiche la première image
+    }
+
+    // 3. Affiche l'image courante
+    function showImage(index) {
+      if (index >= images.length) return alert("Fin des images !");
+      document.getElementById('photo').src = images[index].url;
+    }
+
+    // 4. Gère le vote
+    async function vote(answer) {
+      const current = images[currentIndex];
+      if (!current) return;
+
+      votes[current.name][answer]++;
+      await saveVotes();
+
+      currentIndex++;
+      if (currentIndex < images.length) {
+        showImage(currentIndex);
+      } else {
+        alert("Tous les votes sont faits !");
+      }
+    }
+
+    // 5. Charge les votes existants
+    async function loadVotes() {
+      const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${jsonFile}`, {
+        headers: { Authorization: `token ${GITHUB_TOKEN}` }
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const content = atob(data.content);
+        votes = JSON.parse(content);
+        fileSHA = data.sha;
+      } else {
+        votes = {};
+        fileSHA = null;
+      }
+    }
+
+    // 6. Sauvegarde des votes
+    async function saveVotes() {
+      const contentString = JSON.stringify(votes, null, 2);
+      const contentBase64 = btoa(unescape(encodeURIComponent(contentString)));
+
+      const body = {
+        message: `Mise à jour des votes pour ${images[currentIndex].name}`,
+        content: contentBase64,
+        committer: {
+          name: "VoteBot",
+          email: "bot@example.com"
+        }
+      };
+      if (fileSHA) body.sha = fileSHA;
+
+      const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${jsonFile}`, {
+        method: 'PUT',
+        headers: {
+          Authorization: `token ${GITHUB_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body)
+      });
+
+      const result = await res.json();
+      if (!res.ok) {
+        console.error("Erreur GitHub PUT:", result);
+        alert("Erreur lors de la sauvegarde !");
+        return;
+      }
+
+      fileSHA = result.content.sha;
+    }
+
+    // Démarrage : récupère le token puis charge les images
+    fetchTokenFromFileName()
+      .then(loadImages)
+      .catch(err => {
+        alert("Erreur : " + err.message);
+        console.error(err);
+      });
+  </script>
+</body>
+</html>
