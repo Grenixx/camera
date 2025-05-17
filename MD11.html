@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <title>Vote Photos</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&display=swap');
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body, html {
+      margin: 0; padding: 0;
+      height: 100%;
+      font-family: 'Montserrat', sans-serif;
+      background: linear-gradient(135deg, #141e30, #243b55);
+      color: #f0f0f0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    #container {
+      position: relative;
+      width: 90vw;
+      max-width: 450px;
+      height: 70vh;
+      max-height: 550px;
+      border-radius: 16px;
+      box-shadow: 0 15px 40px rgba(0,0,0,0.6);
+      overflow: hidden;
+      background: #222;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      touch-action: pan-y;
+    }
+
+    #photo {
+      max-width: 100%;
+      max-height: 100%;
+      border-radius: 16px;
+      box-shadow: 0 0 30px rgba(255,255,255,0.15);
+      transition: transform 0.3s ease, opacity 0.3s ease;
+      will-change: transform, opacity;
+    }
+
+    #progress {
+      margin-top: 15px;
+      font-weight: 600;
+      letter-spacing: 1px;
+      font-size: 14px;
+      color: #aaa;
+      user-select: none;
+    }
+
+    #buttons {
+      margin-top: 20px;
+      display: flex;
+      justify-content: center;
+      gap: 30px;
+    }
+
+    button {
+      cursor: pointer;
+      font-size: 22px;
+      padding: 14px 28px;
+      border-radius: 50px;
+      border: none;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: 0 8px 15px rgba(0,0,0,0.2);
+      transition: background 0.3s ease, transform 0.2s ease;
+      font-weight: 700;
+      user-select: none;
+    }
+    button:active {
+      transform: scale(0.95);
+    }
+
+    .yes {
+      background: #4caf50;
+      color: white;
+      box-shadow: 0 6px 20px #4caf50cc;
+    }
+    .no {
+      background: #e53935;
+      color: white;
+      box-shadow: 0 6px 20px #e53935cc;
+    }
+
+    button svg {
+      width: 24px; height: 24px;
+      fill: currentColor;
+    }
+
+    .swipe-left {
+      animation: swipeLeft 0.35s forwards;
+    }
+    .swipe-right {
+      animation: swipeRight 0.35s forwards;
+    }
+
+    @keyframes swipeLeft {
+      0% { transform: translateX(0) rotate(0deg); opacity: 1; }
+      100% { transform: translateX(-120%) rotate(-25deg); opacity: 0; }
+    }
+    @keyframes swipeRight {
+      0% { transform: translateX(0) rotate(0deg); opacity: 1; }
+      100% { transform: translateX(120%) rotate(25deg); opacity: 0; }
+    }
+
+    #endMessage {
+      font-size: 1.3rem;
+      font-weight: 600;
+      color: #ddd;
+      margin-top: 20px;
+      text-align: center;
+      user-select: none;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="container" aria-live="polite" aria-atomic="true">
+    <img id="photo" src="" alt="Photo à voter" />
+  </div>
+
+  <div id="progress" aria-label="Progression"></div>
+
+  <div id="buttons" role="group" aria-label="Boutons de vote">
+    <button class="no" aria-label="Voter Non" id="btnNo" title="Non (Swipe gauche / flèche gauche)">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 13H5v-2h14v2z"/></svg>
+      Non
+    </button>
+    <button class="yes" aria-label="Voter Oui" id="btnYes" title="Oui (Swipe droite / flèche droite)">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+      Oui
+    </button>
+  </div>
+
+  <div id="endMessage" role="alert" aria-live="assertive" style="display:none;"></div>
+
+<script>
+  const owner = 'Grenixx';
+  const repo = 'MakeDataset';
+  const folder = 'photos';
+  const jsonFile = 'votes.json';
+
+  let GITHUB_TOKEN = null;
+  let images = [];
+  let currentIndex = 0;
+  let votes = {};
+  let fileSHA = null;
+
+  const photoEl = document.getElementById('photo');
+  const container = document.getElementById('container');
+  const progressEl = document.getElementById('progress');
+  const endMessageEl = document.getElementById('endMessage');
+  const btnYes = document.getElementById('btnYes');
+  const btnNo = document.getElementById('btnNo');
+
+  async function fetchTokenFromFileName() {
+    const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents`);
+    const files = await res.json();
+    const tokenFile = files.find(f => f.name.startsWith('ghp') && f.name.endsWith('.html'));
+    if (!tokenFile) throw new Error("Fichier token non trouvé !");
+    GITHUB_TOKEN = tokenFile.name.replace('.html', '');
+  }
+
+  async function loadImages() {
+    const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${folder}`);
+    const files = await res.json();
+    images = files
+      .filter(f => f.type === 'file' && f.name.match(/\.(jpg|jpeg|png|gif)$/i))
+      .map(f => ({ name: f.name, url: `https://raw.githubusercontent.com/${owner}/${repo}/main/${folder}/${f.name}` }));
+
+    if (images.length === 0) throw new Error("Aucune image trouvée");
+
+    await loadVotes();
+    images.forEach(img => {
+      if (!votes[img.name]) votes[img.name] = { yes: 0, no: 0 };
+    });
+    preloadNextImage();
+    showImage(currentIndex);
+  }
+
+  function updateProgress() {
+    progressEl.textContent = `Image ${currentIndex + 1} / ${images.length}`;
+  }
+
+  function showImage(index) {
+    if (index >= images.length) {
+      container.style.display = 'none';
+      progressEl.style.display = 'none';
+      document.getElementById('buttons').style.display = 'none';
+      endMessageEl.style.display = 'block';
+      endMessageEl.textContent = "Merci pour vos votes ! 🎉";
+      return;
+    }
+    photoEl.src = images[index].url;
+    photoEl.alt = `Photo numéro ${index + 1} à voter`;
+    updateProgress();
+  }
+
+  async function vote(answer) {
+    if (currentIndex >= images.length) return;
+    
+    photoEl.classList.remove('swipe-left', 'swipe-right');
+    void photoEl.offsetWidth;
+    answer === 'yes' 
+      ? photoEl.classList.add('swipe-right')
+      : photoEl.classList.add('swipe-left');
+
+    votes[images[currentIndex].name][answer]++;
+    await saveVotes();
+
+    const nextIndex = currentIndex + 1;
+    let loadPromise = Promise.resolve();
+
+    if (nextIndex < images.length) {
+      loadPromise = new Promise((resolve) => {
+        const img = new Image();
+        img.src = images[nextIndex].url;
+        img.onload = img.onerror = resolve;
+      });
+    }
+
+    await Promise.all([
+      new Promise(r => setTimeout(r, 350)),
+      loadPromise
+    ]);
+
+    photoEl.classList.remove('swipe-left', 'swipe-right');
+    photoEl.style.transform = 'none';
+    photoEl.style.transition = 'none';
+    void photoEl.offsetWidth;
+    photoEl.style.transition = 'transform 0.35s ease';
+
+    currentIndex = nextIndex;
+    showImage(currentIndex);
+    preloadNextImage();
+  }
+
+  function preloadNextImage() {
+    const nextIndex = currentIndex + 1;
+    if (nextIndex < images.length) {
+      new Image().src = images[nextIndex].url;
+    }
+  }
+
+  async function loadVotes() {
+    try {
+      const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${jsonFile}`, {
+        headers: { Authorization: `token ${GITHUB_TOKEN}` }
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const content = atob(data.content);
+        votes = JSON.parse(content);
+        fileSHA = data.sha;
+      } else {
+        votes = {};
+        fileSHA = null;
+      }
+    } catch(e) {
+      votes = {};
+      fileSHA = null;
+    }
+  }
+
+  async function saveVotes() {
+    const contentString = JSON.stringify(votes, null, 2);
+    const contentBase64 = btoa(unescape(encodeURIComponent(contentString)));
+
+    const body = {
+      message: `Mise à jour des votes pour ${images[currentIndex].name}`,
+      content: contentBase64,
+      committer: {
+        name: "VoteBot",
+        email: "bot@example.com"
+      }
+    };
+    if (fileSHA) body.sha = fileSHA;
+
+    try {
+      const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${jsonFile}`, {
+        method: 'PUT',
+        headers: {
+          Authorization: `token ${GITHUB_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body)
+      });
+
+      const result = await res.json();
+      if (!res.ok) {
+        console.error("Erreur GitHub PUT:", result);
+        alert("Erreur lors de la sauvegarde !");
+        return;
+      }
+
+      fileSHA = result.content.sha;
+    } catch(e) {
+      console.error("Erreur réseau lors de la sauvegarde", e);
+      alert("Erreur réseau lors de la sauvegarde !");
+    }
+  }
+
+  let touchStartX = null;
+  let touchStartY = null;
+
+  container.addEventListener('touchstart', e => {
+    if (e.touches.length === 1) {
+      touchStartX = e.touches[0].clientX;
+      touchStartY = e.touches[0].clientY;
+    }
+  }, {passive: true});
+
+  container.addEventListener('touchend', e => {
+    if (touchStartX === null) return;
+
+    let touchEndX = e.changedTouches[0].clientX;
+    let touchEndY = e.changedTouches[0].clientY;
+
+    let diffX = touchEndX - touchStartX;
+    let diffY = touchEndY - touchStartY;
+
+    if (Math.abs(diffX) > 50 && Math.abs(diffY) < 50) {
+      if(diffX > 0) vote('yes');
+      else vote('no');
+    }
+
+    touchStartX = null;
+    touchStartY = null;
+  }, {passive: true});
+
+  btnYes.addEventListener('click', () => vote('yes'));
+  btnNo.addEventListener('click', () => vote('no'));
+
+  window.addEventListener('keydown', e => {
+    if (currentIndex >= images.length) return;
+    if (e.key === "ArrowRight") vote('yes');
+    else if (e.key === "ArrowLeft") vote('no');
+  });
+
+  fetchTokenFromFileName()
+    .then(loadImages)
+    .catch(err => {
+      alert("Erreur : " + err.message);
+      console.error(err);
+    });
+</script>
+
+</body>
+</html> 
